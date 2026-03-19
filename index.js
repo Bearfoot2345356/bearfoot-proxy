@@ -3,6 +3,7 @@ const https = require('https');
 const app = express();
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
@@ -11,7 +12,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// ---- CONFIG ----
 const CONFIG = {
   meta: {
     token: 'EAARQ3HPftCIBQZCZCMucYRvSNC18PVBfc4V2fZBZB4pP2Ku4hefI3MUrBoeQrJG4tsZBsz38mnWvMieTDMF2g7bMSjjmAAjFsIounRiB9sbpEqZA6LtnpcptdWcWSw789MZAVdyopljt3xmcTDFptbARBU127oPVdd645djxkZBNiaM0tYCWodeU2ECvRqmFUwZDZD',
@@ -29,7 +29,6 @@ const CONFIG = {
   }
 };
 
-// Expose safe config to frontend
 app.get('/config', (req, res) => {
   res.json({
     meta: { adAccount: CONFIG.meta.adAccount, pageId: CONFIG.meta.pageId, pixelId: CONFIG.meta.pixelId },
@@ -39,16 +38,16 @@ app.get('/config', (req, res) => {
 
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
-// ---- KEEP ALIVE (ping self every 14 minutes) ----
+// Keep alive
 function keepAlive() {
   https.get('https://bearfoot-proxy.onrender.com/health', (r) => {
     let d = ''; r.on('data', c => d += c);
-    r.on('end', () => console.log('Keep-alive ping:', d));
-  }).on('error', (e) => console.log('Keep-alive error:', e.message));
+    r.on('end', () => console.log('ping:', new Date().toISOString()));
+  }).on('error', e => console.log('ping error:', e.message));
 }
-setInterval(keepAlive, 14 * 60 * 1000); // every 14 minutes
+setInterval(keepAlive, 14 * 60 * 1000);
 
-// ---- META API ----
+// META
 function metaRequest(method, path, body) {
   return new Promise((resolve, reject) => {
     const sep = path.includes('?') ? '&' : '?';
@@ -56,7 +55,7 @@ function metaRequest(method, path, body) {
     const bodyStr = body ? JSON.stringify(body) : null;
     const options = { hostname: 'graph.facebook.com', path: fullPath, method, headers: { 'Content-Type': 'application/json' } };
     if (bodyStr) options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
-    const req = https.request(options, (r) => {
+    const req = https.request(options, r => {
       let d = ''; r.on('data', c => d += c);
       r.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
     });
@@ -79,12 +78,11 @@ app.delete('/api/meta', async (req, res) => {
   catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ---- GOOGLE ADS API ----
-let googleAccessToken = null;
-let googleTokenExpiry = 0;
+// GOOGLE
+let gToken = null, gExpiry = 0;
 
-async function getGoogleAccessToken() {
-  if (googleAccessToken && Date.now() < googleTokenExpiry) return googleAccessToken;
+async function getGToken() {
+  if (gToken && Date.now() < gExpiry) return gToken;
   const body = new URLSearchParams({
     client_id: CONFIG.google.clientId,
     client_secret: CONFIG.google.clientSecret,
@@ -92,18 +90,18 @@ async function getGoogleAccessToken() {
     grant_type: 'refresh_token'
   }).toString();
   return new Promise((resolve, reject) => {
-    const options = {
+    const opts = {
       hostname: 'oauth2.googleapis.com', path: '/token', method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) }
     };
-    const req = https.request(options, (r) => {
+    const req = https.request(opts, r => {
       let d = ''; r.on('data', c => d += c);
       r.on('end', () => {
-        const parsed = JSON.parse(d);
-        if (parsed.error) return reject(new Error(parsed.error_description || parsed.error));
-        googleAccessToken = parsed.access_token;
-        googleTokenExpiry = Date.now() + (parsed.expires_in - 60) * 1000;
-        resolve(googleAccessToken);
+        const p = JSON.parse(d);
+        if (p.error) return reject(new Error(p.error_description || p.error));
+        gToken = p.access_token;
+        gExpiry = Date.now() + (p.expires_in - 60) * 1000;
+        resolve(gToken);
       });
     });
     req.on('error', reject);
@@ -112,11 +110,11 @@ async function getGoogleAccessToken() {
   });
 }
 
-async function googleRequest(method, path, body) {
-  const token = await getGoogleAccessToken();
+async function gRequest(method, path, body) {
+  const token = await getGToken();
   const bodyStr = body ? JSON.stringify(body) : null;
   return new Promise((resolve, reject) => {
-    const options = {
+    const opts = {
       hostname: 'googleads.googleapis.com', path, method,
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -125,8 +123,8 @@ async function googleRequest(method, path, body) {
         'Content-Type': 'application/json'
       }
     };
-    if (bodyStr) options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
-    const req = https.request(options, (r) => {
+    if (bodyStr) opts.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+    const req = https.request(opts, r => {
       let d = ''; r.on('data', c => d += c);
       r.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
     });
@@ -137,10 +135,11 @@ async function googleRequest(method, path, body) {
 }
 
 app.post('/api/google/query', async (req, res) => {
-  const { query } = req.body;
-  if (!query) return res.status(400).json({ error: 'Missing query' });
+  console.log('Google query body:', JSON.stringify(req.body));
+  const query = req.body && req.body.query;
+  if (!query) return res.status(400).json({ error: 'Missing query', received: req.body });
   try {
-    const data = await googleRequest('POST',
+    const data = await gRequest('POST',
       `/v18/customers/${CONFIG.google.clientAccountId}/googleAds:search`,
       { query }
     );
@@ -149,10 +148,10 @@ app.post('/api/google/query', async (req, res) => {
 });
 
 app.post('/api/google/mutate', async (req, res) => {
-  const { resource, operations } = req.body;
+  const { resource, operations } = req.body || {};
   if (!operations) return res.status(400).json({ error: 'Missing operations' });
   try {
-    const data = await googleRequest('POST',
+    const data = await gRequest('POST',
       `/v18/customers/${CONFIG.google.clientAccountId}/${resource}:mutate`,
       { operations }
     );
@@ -162,6 +161,5 @@ app.post('/api/google/mutate', async (req, res) => {
 
 app.listen(process.env.PORT || 3000, () => {
   console.log('Bearfoot proxy running');
-  // Initial ping after 1 minute to register keep-alive
   setTimeout(keepAlive, 60 * 1000);
 });
