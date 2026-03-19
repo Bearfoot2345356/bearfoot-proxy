@@ -11,7 +11,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const TOKEN = 'EAARQ3HPftCIBQZBlD9qZBKtq2pwQfvZC4kiXdQnrfcnqs4HZBJ12OEv8IoYkzKldh42ZAisJbV91dTZCEEHLXCrOZCe2Sranto3XWtIWhNeFEBPPr5nLHzW3Chu67Y87jaZC9aaFDe8S6HPZCjK6xJF76meAfFso2m0u1MKsyhWKvOmicHDaXOZBPuSZCtZBiskEjAHZAG5GNpavX7xISXOHnQPV1HKuwnRRUvoLtTeQcGYcFGHQRpUr5u9EZCOx9DNWwnrsGYTzs3OcXKKBvZCj1RwMjGR';
+const TOKEN = 'EAARQ3HPftCIBQZCZCMucYRvSNC18PVBfc4V2fZBZB4pP2Ku4hefI3MUrBoeQrJG4tsZBsz38mnWvMieTDMF2g7bMSjjmAAjFsIounRiB9sbpEqZA6LtnpcptdWcWSw789MZAVdyopljt3xmcTDFptbARBU127oPVdd645djxkZBNiaM0tYCWodeU2ECvRqmFUwZDZD';
 
 function metaRequest(method, path, body) {
   return new Promise((resolve, reject) => {
