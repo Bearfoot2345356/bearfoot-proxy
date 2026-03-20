@@ -20,7 +20,7 @@ const CONFIG = {
     pixelId: '470255323754555'
   },
   google: {
-    developerToken: 'ZoHf32jakJf2ajRF-RZY8g',
+    developerToken: '9ROaoYVnG3mY8hWPdye5cw',
     clientId: '6736684714-aas0ved9nrml829deu6d7jgf4j388p5s.apps.googleusercontent.com',
     clientSecret: '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',
     refreshToken: '1//04LHL5kmZkZnXCgYIARAAgAQSNwF-L9IrShx4wMHkN1pEMBljqZoGqRMVmjRj1b0c8K7BqasyfMCginGI4yCZY2MU77tpaWTlWxg',
@@ -38,7 +38,6 @@ app.get('/config', (req, res) => {
 
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
-// Keep alive
 function keepAlive() {
   https.get('https://bearfoot-proxy.onrender.com/health', (r) => {
     let d = ''; r.on('data', c => d += c);
@@ -98,6 +97,7 @@ async function getGToken() {
       let d = ''; r.on('data', c => d += c);
       r.on('end', () => {
         const p = JSON.parse(d);
+        console.log('Token response:', JSON.stringify(p).substring(0, 100));
         if (p.error) return reject(new Error(p.error_description || p.error));
         gToken = p.access_token;
         gExpiry = Date.now() + (p.expires_in - 60) * 1000;
@@ -124,9 +124,13 @@ async function gRequest(method, path, body) {
       }
     };
     if (bodyStr) opts.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+    console.log('Google request to:', path);
     const req = https.request(opts, r => {
       let d = ''; r.on('data', c => d += c);
-      r.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
+      r.on('end', () => {
+        console.log('Google response status:', r.statusCode, 'body:', d.substring(0, 200));
+        try { resolve(JSON.parse(d)); } catch(e) { reject(e); }
+      });
     });
     req.on('error', reject);
     if (bodyStr) req.write(bodyStr);
@@ -135,16 +139,18 @@ async function gRequest(method, path, body) {
 }
 
 app.post('/api/google/query', async (req, res) => {
-  console.log('Google query body:', JSON.stringify(req.body));
   const query = req.body && req.body.query;
   if (!query) return res.status(400).json({ error: 'Missing query', received: req.body });
   try {
+    // Try v17 API
     const data = await gRequest('POST',
-      `/v18/customers/${CONFIG.google.clientAccountId}/googleAds:search`,
+      `/v17/customers/${CONFIG.google.clientAccountId}/googleAds:searchStream`,
       { query }
     );
     res.json(data);
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/google/mutate', async (req, res) => {
@@ -152,7 +158,7 @@ app.post('/api/google/mutate', async (req, res) => {
   if (!operations) return res.status(400).json({ error: 'Missing operations' });
   try {
     const data = await gRequest('POST',
-      `/v18/customers/${CONFIG.google.clientAccountId}/${resource}:mutate`,
+      `/v17/customers/${CONFIG.google.clientAccountId}/${resource}:mutate`,
       { operations }
     );
     res.json(data);
@@ -160,6 +166,6 @@ app.post('/api/google/mutate', async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy running');
+  console.log('Bearfoot proxy v3 running');
   setTimeout(keepAlive, 60 * 1000);
 });
