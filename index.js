@@ -29,7 +29,6 @@ const CONFIG = {
   }
 };
 
-// In-memory job store
 const jobs = {};
 
 app.get('/config', (req, res) => {
@@ -165,13 +164,11 @@ app.post('/api/google/mutate', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ASYNC CAMPAIGN CREATION
 async function runCampaignCreation(jobId, campaignName, dailyBudgetDollars, adGroups) {
   const customerId = CONFIG.google.clientAccountId;
   const job = jobs[jobId];
 
   try {
-    // Step 1: Budget
     job.step = 'Creating budget';
     const budgetResult = await gRequest('POST',
       `/v20/customers/${customerId}/campaignBudgets:mutate`,
@@ -186,7 +183,6 @@ async function runCampaignCreation(jobId, campaignName, dailyBudgetDollars, adGr
     const budgetResourceName = budgetResult.data.results[0].resourceName;
     job.results.budget = budgetResourceName;
 
-    // Step 2: Campaign
     job.step = 'Creating campaign';
     const campaignResult = await gRequest('POST',
       `/v20/customers/${customerId}/campaigns:mutate`,
@@ -196,14 +192,14 @@ async function runCampaignCreation(jobId, campaignName, dailyBudgetDollars, adGr
         advertisingChannelType: 'SEARCH',
         campaignBudget: budgetResourceName,
         maximizeConversions: {},
-        networkSettings: { targetGoogleSearch: true, targetSearchNetwork: true, targetContentNetwork: false }
+        networkSettings: { targetGoogleSearch: true, targetSearchNetwork: true, targetContentNetwork: false },
+        containsEuPoliticalAdvertising: false
       }}]}
     );
     if (campaignResult.status !== 200) throw new Error('Campaign failed: ' + JSON.stringify(campaignResult.data));
     const campaignResourceName = campaignResult.data.results[0].resourceName;
     job.results.campaign = { resourceName: campaignResourceName, id: campaignResourceName.split('/').pop() };
 
-    // Step 3: Ad groups
     if (adGroups && adGroups.length > 0) {
       for (const ag of adGroups) {
         job.step = `Creating ad group: ${ag.name}`;
@@ -222,7 +218,6 @@ async function runCampaignCreation(jobId, campaignName, dailyBudgetDollars, adGr
         const adGroupResourceName = adGroupResult.data.results[0].resourceName;
         agResult.adGroup = { resourceName: adGroupResourceName, id: adGroupResourceName.split('/').pop(), name: ag.name };
 
-        // Keywords
         if (ag.keywords && ag.keywords.length > 0) {
           const kwResult = await gRequest('POST',
             `/v20/customers/${customerId}/adGroupCriteria:mutate`,
@@ -232,7 +227,6 @@ async function runCampaignCreation(jobId, campaignName, dailyBudgetDollars, adGr
           if (kwResult.status !== 200) agResult.keywordsError = kwResult.data;
         }
 
-        // Ad
         if (ag.ad) {
           const adResult = await gRequest('POST',
             `/v20/customers/${customerId}/adGroupAds:mutate`,
@@ -267,13 +261,9 @@ async function runCampaignCreation(jobId, campaignName, dailyBudgetDollars, adGr
 app.post('/api/google/create-campaign', async (req, res) => {
   const { campaignName, dailyBudgetDollars, adGroups } = req.body || {};
   if (!campaignName) return res.status(400).json({ error: 'Missing campaignName' });
-
   const jobId = Date.now().toString();
   jobs[jobId] = { status: 'running', step: 'Starting', results: { budget: null, campaign: null, adGroups: [] } };
-
-  // Start async — respond immediately
   runCampaignCreation(jobId, campaignName, dailyBudgetDollars, adGroups);
-
   res.json({ jobId, status: 'running', message: 'Campaign creation started. Poll /api/google/job/:jobId for status.' });
 });
 
@@ -284,6 +274,6 @@ app.get('/api/google/job/:jobId', (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v5 running');
+  console.log('Bearfoot proxy v6 running');
   setTimeout(keepAlive, 60 * 1000);
 });
