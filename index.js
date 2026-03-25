@@ -128,8 +128,8 @@ async function gRequest(method, path, body) {
     const req = https.request(opts, r => {
       let d = ''; r.on('data', c => d += c);
       r.on('end', () => {
-        console.log('Google response status:', r.statusCode, 'body:', d.substring(0, 200));
-        try { resolve(JSON.parse(d)); } catch(e) { reject(e); }
+        console.log('Google response status:', r.statusCode, 'body:', d.substring(0, 500));
+        try { resolve({ status: r.statusCode, data: JSON.parse(d) }); } catch(e) { reject(e); }
       });
     });
     req.on('error', reject);
@@ -142,11 +142,11 @@ app.post('/api/google/query', async (req, res) => {
   const query = req.body && req.body.query;
   if (!query) return res.status(400).json({ error: 'Missing query', received: req.body });
   try {
-    const data = await gRequest('POST',
+    const result = await gRequest('POST',
       `/v20/customers/${CONFIG.google.clientAccountId}/googleAds:searchStream`,
       { query }
     );
-    res.json(data);
+    res.json(result.data);
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -156,15 +156,134 @@ app.post('/api/google/mutate', async (req, res) => {
   const { resource, operations } = req.body || {};
   if (!operations) return res.status(400).json({ error: 'Missing operations' });
   try {
-    const data = await gRequest('POST',
+    const result = await gRequest('POST',
       `/v20/customers/${CONFIG.google.clientAccountId}/${resource}:mutate`,
       { operations }
     );
-    res.json(data);
+    res.json(result.data);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// DEDICATED CAMPAIGN CREATION ENDPOINT
+app.post('/api/google/create-campaign', async (req, res) => {
+  const { campaignName, dailyBudgetDollars, adGroups } = req.body || {};
+  if (!campaignName) return res.status(400).json({ error: 'Missing campaignName' });
+
+  const customerId = CONFIG.google.clientAccountId;
+  const results = { budget: null, campaign: null, adGroups: [] };
+
+  try {
+    // Step 1: Create budget
+    console.log('Creating budget...');
+    const budgetResult = await gRequest('POST',
+      `/v20/customers/${customerId}/campaignBudgets:mutate`,
+      { operations: [{ create: {
+        name: `${campaignName} Budget`,
+        amountMicros: String((dailyBudgetDollars || 50) * 1000000),
+        deliveryMethod: 'STANDARD',
+        explicitlyShared: false
+      }}]}
+    );
+    if (budgetResult.status !== 200) return res.status(500).json({ error: 'Budget creation failed', details: budgetResult.data });
+    const budgetResourceName = budgetResult.data.results[0].resourceName;
+    results.budget = budgetResourceName;
+    console.log('Budget created:', budgetResourceName);
+
+    // Step 2: Create campaign
+    console.log('Creating campaign...');
+    const campaignResult = await gRequest('POST',
+      `/v20/customers/${customerId}/campaigns:mutate`,
+      { operations: [{ create: {
+        name: campaignName,
+        status: 'PAUSED',
+        advertisingChannelType: 'SEARCH',
+        campaignBudget: budgetResourceName,
+        maximizeConversions: {},
+        networkSettings: {
+          targetGoogleSearch: true,
+          targetSearchNetwork: true,
+          targetContentNetwork: false
+        }
+      }}]}
+    );
+    if (campaignResult.status !== 200) return res.status(500).json({ error: 'Campaign creation failed', details: campaignResult.data });
+    const campaignResourceName = campaignResult.data.results[0].resourceName;
+    const campaignId = campaignResourceName.split('/').pop();
+    results.campaign = { resourceName: campaignResourceName, id: campaignId };
+    console.log('Campaign created:', campaignResourceName);
+
+    // Step 3: Create ad groups, keywords, and ads
+    if (adGroups && adGroups.length > 0) {
+      for (const ag of adGroups) {
+        const agResult = {};
+
+        // Create ad group
+        const adGroupResult = await gRequest('POST',
+          `/v20/customers/${customerId}/adGroups:mutate`,
+          { operations: [{ create: {
+            name: ag.name,
+            campaign: campaignResourceName,
+            status: 'ENABLED',
+            type: 'SEARCH_STANDARD'
+          }}]}
+        );
+        if (adGroupResult.status !== 200) {
+          agResult.error = adGroupResult.data;
+          results.adGroups.push(agResult);
+          continue;
+        }
+        const adGroupResourceName = adGroupResult.data.results[0].resourceName;
+        const adGroupId = adGroupResourceName.split('/').pop();
+        agResult.adGroup = { resourceName: adGroupResourceName, id: adGroupId, name: ag.name };
+        console.log('Ad group created:', adGroupResourceName);
+
+        // Create keywords
+        if (ag.keywords && ag.keywords.length > 0) {
+          const kwOps = ag.keywords.map(kw => ({ create: {
+            adGroup: adGroupResourceName,
+            text: kw,
+            matchType: 'BROAD'
+          }}));
+          const kwResult = await gRequest('POST',
+            `/v20/customers/${customerId}/adGroupCriteria:mutate`,
+            { operations: kwOps }
+          );
+          agResult.keywords = kwResult.status === 200 ? kwResult.data.results.map(r => r.resourceName) : { error: kwResult.data };
+          console.log('Keywords created for', ag.name);
+        }
+
+        // Create responsive search ad
+        if (ag.ad) {
+          const adResult = await gRequest('POST',
+            `/v20/customers/${customerId}/adGroupAds:mutate`,
+            { operations: [{ create: {
+              adGroup: adGroupResourceName,
+              status: 'ENABLED',
+              ad: {
+                finalUrls: [ag.ad.finalUrl || 'https://bearfoot.store'],
+                responsiveSearchAd: {
+                  headlines: ag.ad.headlines.map(h => ({ text: h })),
+                  descriptions: ag.ad.descriptions.map(d => ({ text: d }))
+                }
+              }
+            }}]}
+          );
+          agResult.ad = adResult.status === 200 ? adResult.data.results[0].resourceName : { error: adResult.data };
+          console.log('Ad created for', ag.name);
+        }
+
+        results.adGroups.push(agResult);
+      }
+    }
+
+    res.json({ success: true, results });
+  } catch(e) {
+    console.error('Campaign creation error:', e.message);
+    res.status(500).json({ error: e.message, partialResults: results });
+  }
+});
+
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v3 running');
+  console.log('Bearfoot proxy v4 running');
   setTimeout(keepAlive, 60 * 1000);
 });
