@@ -143,7 +143,7 @@ app.post('/api/google/query', async (req, res) => {
   if (!query) return res.status(400).json({ error: 'Missing query', received: req.body });
   try {
     const data = await gRequest('POST',
-      `/v17/customers/${CONFIG.google.clientAccountId}/googleAds:searchStream`,
+      `/v20/customers/${CONFIG.google.clientAccountId}/googleAds:searchStream`,
       { query }
     );
     res.json(data);
@@ -157,7 +157,7 @@ app.post('/api/google/mutate', async (req, res) => {
   if (!operations) return res.status(400).json({ error: 'Missing operations' });
   try {
     const data = await gRequest('POST',
-      `/v17/customers/${CONFIG.google.clientAccountId}/${resource}:mutate`,
+      `/v20/customers/${CONFIG.google.clientAccountId}/${resource}:mutate`,
       { operations }
     );
     res.json(data);
