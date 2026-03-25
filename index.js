@@ -193,7 +193,7 @@ async function runCampaignCreation(jobId, campaignName, dailyBudgetDollars, adGr
         campaignBudget: budgetResourceName,
         maximizeConversions: {},
         networkSettings: { targetGoogleSearch: true, targetSearchNetwork: true, targetContentNetwork: false },
-        containsEuPoliticalAdvertising: false
+        containsEuPoliticalAdvertising: 'NOT_EU_POLITICAL_ADVERTISING'
       }}]}
     );
     if (campaignResult.status !== 200) throw new Error('Campaign failed: ' + JSON.stringify(campaignResult.data));
@@ -274,6 +274,6 @@ app.get('/api/google/job/:jobId', (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v6 running');
+  console.log('Bearfoot proxy v7 running');
   setTimeout(keepAlive, 60 * 1000);
 });
