@@ -29,6 +29,9 @@ const CONFIG = {
   }
 };
 
+// In-memory job store
+const jobs = {};
+
 app.get('/config', (req, res) => {
   res.json({
     meta: { adAccount: CONFIG.meta.adAccount, pageId: CONFIG.meta.pageId, pixelId: CONFIG.meta.pixelId },
@@ -97,7 +100,6 @@ async function getGToken() {
       let d = ''; r.on('data', c => d += c);
       r.on('end', () => {
         const p = JSON.parse(d);
-        console.log('Token response:', JSON.stringify(p).substring(0, 100));
         if (p.error) return reject(new Error(p.error_description || p.error));
         gToken = p.access_token;
         gExpiry = Date.now() + (p.expires_in - 60) * 1000;
@@ -124,11 +126,10 @@ async function gRequest(method, path, body) {
       }
     };
     if (bodyStr) opts.headers['Content-Length'] = Buffer.byteLength(bodyStr);
-    console.log('Google request to:', path);
     const req = https.request(opts, r => {
       let d = ''; r.on('data', c => d += c);
       r.on('end', () => {
-        console.log('Google response status:', r.statusCode, 'body:', d.substring(0, 500));
+        console.log('Google', method, path.split('/').pop(), 'status:', r.statusCode);
         try { resolve({ status: r.statusCode, data: JSON.parse(d) }); } catch(e) { reject(e); }
       });
     });
@@ -164,17 +165,14 @@ app.post('/api/google/mutate', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// DEDICATED CAMPAIGN CREATION ENDPOINT
-app.post('/api/google/create-campaign', async (req, res) => {
-  const { campaignName, dailyBudgetDollars, adGroups } = req.body || {};
-  if (!campaignName) return res.status(400).json({ error: 'Missing campaignName' });
-
+// ASYNC CAMPAIGN CREATION
+async function runCampaignCreation(jobId, campaignName, dailyBudgetDollars, adGroups) {
   const customerId = CONFIG.google.clientAccountId;
-  const results = { budget: null, campaign: null, adGroups: [] };
+  const job = jobs[jobId];
 
   try {
-    // Step 1: Create budget
-    console.log('Creating budget...');
+    // Step 1: Budget
+    job.step = 'Creating budget';
     const budgetResult = await gRequest('POST',
       `/v20/customers/${customerId}/campaignBudgets:mutate`,
       { operations: [{ create: {
@@ -184,13 +182,12 @@ app.post('/api/google/create-campaign', async (req, res) => {
         explicitlyShared: false
       }}]}
     );
-    if (budgetResult.status !== 200) return res.status(500).json({ error: 'Budget creation failed', details: budgetResult.data });
+    if (budgetResult.status !== 200) throw new Error('Budget failed: ' + JSON.stringify(budgetResult.data));
     const budgetResourceName = budgetResult.data.results[0].resourceName;
-    results.budget = budgetResourceName;
-    console.log('Budget created:', budgetResourceName);
+    job.results.budget = budgetResourceName;
 
-    // Step 2: Create campaign
-    console.log('Creating campaign...');
+    // Step 2: Campaign
+    job.step = 'Creating campaign';
     const campaignResult = await gRequest('POST',
       `/v20/customers/${customerId}/campaigns:mutate`,
       { operations: [{ create: {
@@ -199,25 +196,19 @@ app.post('/api/google/create-campaign', async (req, res) => {
         advertisingChannelType: 'SEARCH',
         campaignBudget: budgetResourceName,
         maximizeConversions: {},
-        networkSettings: {
-          targetGoogleSearch: true,
-          targetSearchNetwork: true,
-          targetContentNetwork: false
-        }
+        networkSettings: { targetGoogleSearch: true, targetSearchNetwork: true, targetContentNetwork: false }
       }}]}
     );
-    if (campaignResult.status !== 200) return res.status(500).json({ error: 'Campaign creation failed', details: campaignResult.data });
+    if (campaignResult.status !== 200) throw new Error('Campaign failed: ' + JSON.stringify(campaignResult.data));
     const campaignResourceName = campaignResult.data.results[0].resourceName;
-    const campaignId = campaignResourceName.split('/').pop();
-    results.campaign = { resourceName: campaignResourceName, id: campaignId };
-    console.log('Campaign created:', campaignResourceName);
+    job.results.campaign = { resourceName: campaignResourceName, id: campaignResourceName.split('/').pop() };
 
-    // Step 3: Create ad groups, keywords, and ads
+    // Step 3: Ad groups
     if (adGroups && adGroups.length > 0) {
       for (const ag of adGroups) {
+        job.step = `Creating ad group: ${ag.name}`;
         const agResult = {};
 
-        // Create ad group
         const adGroupResult = await gRequest('POST',
           `/v20/customers/${customerId}/adGroups:mutate`,
           { operations: [{ create: {
@@ -227,32 +218,21 @@ app.post('/api/google/create-campaign', async (req, res) => {
             type: 'SEARCH_STANDARD'
           }}]}
         );
-        if (adGroupResult.status !== 200) {
-          agResult.error = adGroupResult.data;
-          results.adGroups.push(agResult);
-          continue;
-        }
+        if (adGroupResult.status !== 200) { agResult.error = adGroupResult.data; job.results.adGroups.push(agResult); continue; }
         const adGroupResourceName = adGroupResult.data.results[0].resourceName;
-        const adGroupId = adGroupResourceName.split('/').pop();
-        agResult.adGroup = { resourceName: adGroupResourceName, id: adGroupId, name: ag.name };
-        console.log('Ad group created:', adGroupResourceName);
+        agResult.adGroup = { resourceName: adGroupResourceName, id: adGroupResourceName.split('/').pop(), name: ag.name };
 
-        // Create keywords
+        // Keywords
         if (ag.keywords && ag.keywords.length > 0) {
-          const kwOps = ag.keywords.map(kw => ({ create: {
-            adGroup: adGroupResourceName,
-            text: kw,
-            matchType: 'BROAD'
-          }}));
           const kwResult = await gRequest('POST',
             `/v20/customers/${customerId}/adGroupCriteria:mutate`,
-            { operations: kwOps }
+            { operations: ag.keywords.map(kw => ({ create: { adGroup: adGroupResourceName, text: kw, matchType: 'BROAD' }})) }
           );
-          agResult.keywords = kwResult.status === 200 ? kwResult.data.results.map(r => r.resourceName) : { error: kwResult.data };
-          console.log('Keywords created for', ag.name);
+          agResult.keywordsCreated = kwResult.status === 200 ? kwResult.data.results.length : 0;
+          if (kwResult.status !== 200) agResult.keywordsError = kwResult.data;
         }
 
-        // Create responsive search ad
+        // Ad
         if (ag.ad) {
           const adResult = await gRequest('POST',
             `/v20/customers/${customerId}/adGroupAds:mutate`,
@@ -268,22 +248,42 @@ app.post('/api/google/create-campaign', async (req, res) => {
               }
             }}]}
           );
-          agResult.ad = adResult.status === 200 ? adResult.data.results[0].resourceName : { error: adResult.data };
-          console.log('Ad created for', ag.name);
+          agResult.adCreated = adResult.status === 200;
+          if (adResult.status !== 200) agResult.adError = adResult.data;
         }
 
-        results.adGroups.push(agResult);
+        job.results.adGroups.push(agResult);
       }
     }
 
-    res.json({ success: true, results });
+    job.status = 'done';
+    job.step = 'Complete';
   } catch(e) {
-    console.error('Campaign creation error:', e.message);
-    res.status(500).json({ error: e.message, partialResults: results });
+    job.status = 'error';
+    job.error = e.message;
   }
+}
+
+app.post('/api/google/create-campaign', async (req, res) => {
+  const { campaignName, dailyBudgetDollars, adGroups } = req.body || {};
+  if (!campaignName) return res.status(400).json({ error: 'Missing campaignName' });
+
+  const jobId = Date.now().toString();
+  jobs[jobId] = { status: 'running', step: 'Starting', results: { budget: null, campaign: null, adGroups: [] } };
+
+  // Start async — respond immediately
+  runCampaignCreation(jobId, campaignName, dailyBudgetDollars, adGroups);
+
+  res.json({ jobId, status: 'running', message: 'Campaign creation started. Poll /api/google/job/:jobId for status.' });
+});
+
+app.get('/api/google/job/:jobId', (req, res) => {
+  const job = jobs[req.params.jobId];
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job);
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v4 running');
+  console.log('Bearfoot proxy v5 running');
   setTimeout(keepAlive, 60 * 1000);
 });
