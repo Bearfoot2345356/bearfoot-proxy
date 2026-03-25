@@ -23,7 +23,7 @@ const CONFIG = {
     developerToken: '9ROaoYVnG3mY8hWPdye5cw',
     clientId: '6736684714-aas0ved9nrml829deu6d7jgf4j388p5s.apps.googleusercontent.com',
     clientSecret: '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',
-    refreshToken: '1//1//0446qI9tspJjsCgYIARAAGAQSNwF-L9Ir0Twn0Y9RBe2UPWh_9_ROqB2a0ZT6sPa4xkllI_50oWtDlIwiq-NUoWMrJzz5xvA8PrgkmZkZnXCgYIARAAgAQSNwF-L9IrShx4wMHkN1pEMBljqZoGqRMVmjRj1b0c8K7BqasyfMCginGI4yCZY2MU77tpaWTlWxg',
+    refreshToken: '1//0446qI9tspJjsCgYIARAAGAQSNwF-L9Ir0Twn0Y9RBe2UPWh_9_ROqB2a0ZT6sPa4xkllI_50oWtDlIwiq-NUoWMrJzz5xvA8Prg',
     managerAccountId: '4491645864',
     clientAccountId: '8166793966'
   }
@@ -142,7 +142,6 @@ app.post('/api/google/query', async (req, res) => {
   const query = req.body && req.body.query;
   if (!query) return res.status(400).json({ error: 'Missing query', received: req.body });
   try {
-    // Try v17 API
     const data = await gRequest('POST',
       `/v17/customers/${CONFIG.google.clientAccountId}/googleAds:searchStream`,
       { query }
