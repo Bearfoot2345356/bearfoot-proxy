@@ -34,7 +34,8 @@ const CONFIG = {
     apiKey: 'eOKo8c33gp5ZKenm9kfgflFKI',
     apiKeySecret: 'XQElMnbmY5a5WJiv3OjZErC0NoPVa6KTR3AG11zboKav9uVLZD',
     accessToken: '1750587296900943872-zd9FSjEvnoyhVJjMbN3pCsG3f6XN75',
-    accessTokenSecret: 'qGV44puxosZaoOg5MpPRW3d2wvBjQYERtmOofflQbDVea'
+    accessTokenSecret: 'qGV44puxosZaoOg5MpPRW3d2wvBjQYERtmOofflQbDVea',
+    adsAccountId: '18ce55nt6zg'
   }
 };
 
@@ -44,7 +45,7 @@ app.get('/config', (req, res) => {
   res.json({
     meta: { adAccount: CONFIG.meta.adAccount, pageId: CONFIG.meta.pageId, pixelId: CONFIG.meta.pixelId },
     google: { managerAccountId: CONFIG.google.managerAccountId, clientAccountId: CONFIG.google.clientAccountId },
-    twitter: { apiKey: CONFIG.twitter.apiKey, accessToken: CONFIG.twitter.accessToken }
+    twitter: { apiKey: CONFIG.twitter.apiKey, accessToken: CONFIG.twitter.accessToken, adsAccountId: CONFIG.twitter.adsAccountId }
   });
 });
 
@@ -90,7 +91,7 @@ app.delete('/api/meta', async (req, res) => {
   catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── Twitter / X ─────────────────────────────────────────────────────────────
+// ─── Twitter / X (organic) ───────────────────────────────────────────────────
 
 function twitterOAuthHeader(method, url, params) {
   const oauthParams = {
@@ -138,7 +139,6 @@ function twitterRequest(method, path, body, useBearer) {
   });
 }
 
-// Twitter v2 endpoints — OAuth 1.0a for user actions, Bearer for read-only
 app.get('/api/twitter', async (req, res) => {
   const path = req.query.path;
   if (!path) return res.status(400).json({ error: 'Missing path' });
@@ -162,6 +162,93 @@ app.delete('/api/twitter', async (req, res) => {
   if (!path) return res.status(400).json({ error: 'Missing path' });
   try {
     const result = await twitterRequest('DELETE', path, null, false);
+    res.status(result.status).json(result.data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── X Ads API ───────────────────────────────────────────────────────────────
+
+function xAdsRequest(method, path, body) {
+  return new Promise((resolve, reject) => {
+    const baseUrl = `https://ads-api.twitter.com${path}`;
+    const bodyStr = body ? JSON.stringify(body) : null;
+    const headers = {
+      'Authorization': twitterOAuthHeader(method, baseUrl, {}),
+      'Content-Type': 'application/json'
+    };
+    if (bodyStr) headers['Content-Length'] = Buffer.byteLength(bodyStr);
+    const urlObj = new URL(baseUrl);
+    const opts = { hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method, headers };
+    const req = https.request(opts, r => {
+      let d = ''; r.on('data', c => d += c);
+      r.on('end', () => {
+        console.log('X Ads', method, path, 'status:', r.statusCode);
+        try { resolve({ status: r.statusCode, data: JSON.parse(d) }); } catch(e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+// Generic X Ads passthrough — GET/POST/DELETE to ads-api.twitter.com
+app.get('/api/xads', async (req, res) => {
+  const path = req.query.path;
+  if (!path) return res.status(400).json({ error: 'Missing path' });
+  try {
+    const result = await xAdsRequest('GET', path, null);
+    res.status(result.status).json(result.data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/xads', async (req, res) => {
+  const path = req.query.path;
+  if (!path) return res.status(400).json({ error: 'Missing path' });
+  try {
+    const result = await xAdsRequest('POST', path, req.body);
+    res.status(result.status).json(result.data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/xads', async (req, res) => {
+  const path = req.query.path;
+  if (!path) return res.status(400).json({ error: 'Missing path' });
+  try {
+    const result = await xAdsRequest('DELETE', path, null);
+    res.status(result.status).json(result.data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Convenience: account summary
+app.get('/api/xads/account', async (req, res) => {
+  try {
+    const result = await xAdsRequest('GET', `/12/accounts/${CONFIG.twitter.adsAccountId}`, null);
+    res.status(result.status).json(result.data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Convenience: list campaigns
+app.get('/api/xads/campaigns', async (req, res) => {
+  try {
+    const result = await xAdsRequest('GET', `/12/accounts/${CONFIG.twitter.adsAccountId}/campaigns`, null);
+    res.status(result.status).json(result.data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Convenience: create campaign
+app.post('/api/xads/campaigns', async (req, res) => {
+  try {
+    const result = await xAdsRequest('POST', `/12/accounts/${CONFIG.twitter.adsAccountId}/campaigns`, req.body);
+    res.status(result.status).json(result.data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Convenience: analytics
+app.get('/api/xads/analytics', async (req, res) => {
+  const qs = req.query.qs || '';
+  try {
+    const result = await xAdsRequest('GET', `/12/stats/accounts/${CONFIG.twitter.adsAccountId}${qs ? '?' + qs : ''}`, null);
     res.status(result.status).json(result.data);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -317,6 +404,6 @@ app.get('/api/google/job/:jobId', (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v10 running');
+  console.log('Bearfoot proxy v11 running');
   setTimeout(keepAlive, 60 * 1000);
 });
