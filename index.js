@@ -1,5 +1,6 @@
 const express = require('express');
 const https = require('https');
+const crypto = require('crypto');
 const app = express();
 
 app.use(express.json());
@@ -27,6 +28,13 @@ const CONFIG = {
     refreshToken: '1//0446qI9tspJjsCgYIARAAGAQSNwF-L9Ir0Twn0Y9RBe2UPWh_9_ROqB2a0ZT6sPa4xkllI_50oWtDlIwiq-NUoWMrJzz5xvA8Prg',
     managerAccountId: '4491645864',
     clientAccountId: '8166793966'
+  },
+  twitter: {
+    bearerToken: 'AAAAAAAAAAAAAAAAAAAAALUY8gEAAAAA5GZzn7NagziikvixBjzBWG0oAdY%3DVzdsllN5UcY4YgtFerbQD4FbcXwWJBPWcvUYv8rZZSsDt3tlUU',
+    apiKey: 'eOKo8c33gp5ZKenm9kfgflFKI',
+    apiKeySecret: 'XQElMnbmY5a5WJiv3OjZErC0NoPVa6KTR3AG11zboKav9uVLZD',
+    accessToken: '1750587296900943872-zd9FSjEvnoyhVJjMbN3pCsG3f6XN75',
+    accessTokenSecret: 'qGV44puxosZaoOg5MpPRW3d2wvBjQYERtmOofflQbDVea'
   }
 };
 
@@ -35,7 +43,8 @@ const jobs = {};
 app.get('/config', (req, res) => {
   res.json({
     meta: { adAccount: CONFIG.meta.adAccount, pageId: CONFIG.meta.pageId, pixelId: CONFIG.meta.pixelId },
-    google: { managerAccountId: CONFIG.google.managerAccountId, clientAccountId: CONFIG.google.clientAccountId }
+    google: { managerAccountId: CONFIG.google.managerAccountId, clientAccountId: CONFIG.google.clientAccountId },
+    twitter: { apiKey: CONFIG.twitter.apiKey, accessToken: CONFIG.twitter.accessToken }
   });
 });
 
@@ -48,6 +57,8 @@ function keepAlive() {
   }).on('error', e => console.log('ping error:', e.message));
 }
 setInterval(keepAlive, 14 * 60 * 1000);
+
+// ─── Meta ────────────────────────────────────────────────────────────────────
 
 function metaRequest(method, path, body) {
   return new Promise((resolve, reject) => {
@@ -78,6 +89,84 @@ app.delete('/api/meta', async (req, res) => {
   try { res.json(await metaRequest('DELETE', req.query.path)); }
   catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ─── Twitter / X ─────────────────────────────────────────────────────────────
+
+function twitterOAuthHeader(method, url, params) {
+  const oauthParams = {
+    oauth_consumer_key: CONFIG.twitter.apiKey,
+    oauth_nonce: crypto.randomBytes(16).toString('hex'),
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
+    oauth_token: CONFIG.twitter.accessToken,
+    oauth_version: '1.0'
+  };
+  const allParams = Object.assign({}, params, oauthParams);
+  const sortedKeys = Object.keys(allParams).sort();
+  const paramStr = sortedKeys.map(k => `${encodeURIComponent(k)}=${encodeURIComponent(allParams[k])}`).join('&');
+  const sigBase = `${method}&${encodeURIComponent(url)}&${encodeURIComponent(paramStr)}`;
+  const sigKey = `${encodeURIComponent(CONFIG.twitter.apiKeySecret)}&${encodeURIComponent(CONFIG.twitter.accessTokenSecret)}`;
+  const signature = crypto.createHmac('sha1', sigKey).update(sigBase).digest('base64');
+  oauthParams.oauth_signature = signature;
+  const headerParts = Object.keys(oauthParams).sort().map(k => `${encodeURIComponent(k)}="${encodeURIComponent(oauthParams[k])}"`);
+  return `OAuth ${headerParts.join(', ')}`;
+}
+
+function twitterRequest(method, path, body, useBearer) {
+  return new Promise((resolve, reject) => {
+    const baseUrl = `https://api.twitter.com${path}`;
+    const bodyStr = body ? JSON.stringify(body) : null;
+    const headers = { 'Content-Type': 'application/json' };
+    if (useBearer) {
+      headers['Authorization'] = `Bearer ${decodeURIComponent(CONFIG.twitter.bearerToken)}`;
+    } else {
+      headers['Authorization'] = twitterOAuthHeader(method, baseUrl, {});
+    }
+    if (bodyStr) headers['Content-Length'] = Buffer.byteLength(bodyStr);
+    const urlObj = new URL(baseUrl);
+    const opts = { hostname: urlObj.hostname, path: urlObj.pathname + urlObj.search, method, headers };
+    const req = https.request(opts, r => {
+      let d = ''; r.on('data', c => d += c);
+      r.on('end', () => {
+        console.log('Twitter', method, path, 'status:', r.statusCode);
+        try { resolve({ status: r.statusCode, data: JSON.parse(d) }); } catch(e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+// Twitter v2 endpoints — OAuth 1.0a for user actions, Bearer for read-only
+app.get('/api/twitter', async (req, res) => {
+  const path = req.query.path;
+  if (!path) return res.status(400).json({ error: 'Missing path' });
+  try {
+    const result = await twitterRequest('GET', path, null, true);
+    res.status(result.status).json(result.data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/twitter', async (req, res) => {
+  const path = req.query.path;
+  if (!path) return res.status(400).json({ error: 'Missing path' });
+  try {
+    const result = await twitterRequest('POST', path, req.body, false);
+    res.status(result.status).json(result.data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/twitter', async (req, res) => {
+  const path = req.query.path;
+  if (!path) return res.status(400).json({ error: 'Missing path' });
+  try {
+    const result = await twitterRequest('DELETE', path, null, false);
+    res.status(result.status).json(result.data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Google Ads ───────────────────────────────────────────────────────────────
 
 let gToken = null, gExpiry = 0;
 
@@ -228,6 +317,6 @@ app.get('/api/google/job/:jobId', (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v9 running');
+  console.log('Bearfoot proxy v10 running');
   setTimeout(keepAlive, 60 * 1000);
 });
