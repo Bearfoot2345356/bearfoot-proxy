@@ -2,7 +2,7 @@ const express = require('express');
 const https = require('https');
 const app = express();
 
-// Universal body parser — reads raw stream, tries JSON then urlencoded
+// Universal body parser
 app.use((req, res, next) => {
   let data = Buffer.alloc(0);
   req.on('data', chunk => { data = Buffer.concat([data, chunk]); });
@@ -39,19 +39,15 @@ const CONFIG = {
     managerAccountId: process.env.GOOGLE_MANAGER_ACCOUNT_ID || '4491645864',
     clientAccountId: process.env.GOOGLE_CLIENT_ACCOUNT_ID || '8166793966'
   },
-  uppromote: {
-    apiKey: process.env.UPPROMOTE_API_KEY
-  }
+  uppromote: { apiKey: process.env.UPPROMOTE_API_KEY }
 };
 
-app.get('/config', (req, res) => {
-  res.json({
-    meta: { adAccount: CONFIG.meta.adAccount, pageId: CONFIG.meta.pageId, pixelId: CONFIG.meta.pixelId },
-    google: { managerAccountId: CONFIG.google.managerAccountId, clientAccountId: CONFIG.google.clientAccountId }
-  });
-});
+app.get('/config', (req, res) => res.json({
+  meta: { adAccount: CONFIG.meta.adAccount, pageId: CONFIG.meta.pageId },
+  google: { managerAccountId: CONFIG.google.managerAccountId, clientAccountId: CONFIG.google.clientAccountId }
+}));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v11' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v12' }));
 
 app.post('/api/debug', (req, res) => {
   res.json({ body: req.body, query: req.query, contentType: req.headers['content-type'] });
@@ -84,16 +80,13 @@ function metaRequest(method, path, body) {
 }
 
 app.get('/api/meta', async (req, res) => {
-  try { res.json(await metaRequest('GET', req.query.path)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await metaRequest('GET', req.query.path)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/meta', async (req, res) => {
-  try { res.json(await metaRequest('POST', req.query.path, req.body)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await metaRequest('POST', req.query.path, req.body)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 app.delete('/api/meta', async (req, res) => {
-  try { res.json(await metaRequest('DELETE', req.query.path)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await metaRequest('DELETE', req.query.path)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // GOOGLE ADS
@@ -128,6 +121,7 @@ async function getGToken() {
   });
 }
 
+// Returns parsed JSON, or { _rawResponse: string, _statusCode: number } if not JSON
 async function gRequest(method, path, body) {
   const token = await getGToken();
   const bodyStr = body ? JSON.stringify(body) : null;
@@ -144,7 +138,14 @@ async function gRequest(method, path, body) {
     if (bodyStr) opts.headers['Content-Length'] = Buffer.byteLength(bodyStr);
     const req = https.request(opts, r => {
       let d = ''; r.on('data', c => d += c);
-      r.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
+      r.on('end', () => {
+        try {
+          resolve(JSON.parse(d));
+        } catch(e) {
+          // Return raw response for debugging instead of rejecting
+          resolve({ _rawResponse: d.substring(0, 500), _statusCode: r.statusCode, _parseError: e.message });
+        }
+      });
     });
     req.on('error', reject);
     if (bodyStr) req.write(bodyStr);
@@ -156,10 +157,7 @@ app.post('/api/google/query', async (req, res) => {
   const query = req.body && req.body.query;
   if (!query) return res.status(400).json({ error: 'Missing query' });
   try {
-    const data = await gRequest('POST',
-      `/v20/customers/${CONFIG.google.clientAccountId}/googleAds:searchStream`,
-      { query }
-    );
+    const data = await gRequest('POST', `/v20/customers/${CONFIG.google.clientAccountId}/googleAds:searchStream`, { query });
     res.json(data);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -171,15 +169,11 @@ app.post('/api/google/mutate', async (req, res) => {
   if (typeof operations === 'string') { try { operations = JSON.parse(operations); } catch(e) {} }
   if (!operations) return res.status(400).json({ error: 'Missing operations' });
   try {
-    const data = await gRequest('POST',
-      `/v20/customers/${CONFIG.google.clientAccountId}/${resource}:mutate`,
-      { operations }
-    );
+    const data = await gRequest('POST', `/v20/customers/${CONFIG.google.clientAccountId}/${resource}:mutate`, { operations });
     res.json(data);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Policy review — also available at /review as fallback
 async function handleReview(req, res) {
   let body = req.body || {};
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch(e) {} }
@@ -212,16 +206,14 @@ async function handleReview(req, res) {
 }
 
 app.post('/api/google/review', handleReview);
-app.post('/review', handleReview);  // top-level fallback path
+app.post('/review', handleReview);
 
 // UPPROMOTE
 function uppromoteRequest(method, path, body) {
   return new Promise((resolve, reject) => {
     const bodyStr = body ? JSON.stringify(body) : null;
     const options = {
-      hostname: 'aff-api.uppromote.com',
-      path: `/api/v2${path}`,
-      method,
+      hostname: 'aff-api.uppromote.com', path: `/api/v2${path}`, method,
       headers: { 'Authorization': CONFIG.uppromote.apiKey, 'Accept': 'application/json', 'Content-Type': 'application/json' }
     };
     if (bodyStr) options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
@@ -237,17 +229,15 @@ function uppromoteRequest(method, path, body) {
 
 app.get('/api/uppromote', async (req, res) => {
   const path = req.query.path || '/affiliates';
-  try { res.json(await uppromoteRequest('GET', path)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await uppromoteRequest('GET', path)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/uppromote', async (req, res) => {
   const path = req.query.path || '/affiliates';
-  try { res.json(await uppromoteRequest('POST', path, req.body)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await uppromoteRequest('POST', path, req.body)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v11 running');
+  console.log('Bearfoot proxy v12 running');
   setTimeout(keepAlive, 5000);
 });
