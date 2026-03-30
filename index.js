@@ -149,7 +149,16 @@ app.post('/api/google/query', async (req, res) => {
 });
 
 app.post('/api/google/mutate', async (req, res) => {
-  const { resource, operations } = req.body || {};
+  let body = req.body || {};
+  // Handle case where entire body arrives as a JSON string (some Zapier modes)
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch(e) {}
+  }
+  let { resource, operations } = body;
+  // Handle case where operations arrives as a JSON string
+  if (typeof operations === 'string') {
+    try { operations = JSON.parse(operations); } catch(e) {}
+  }
   if (!operations) return res.status(400).json({ error: 'Missing operations' });
   try {
     const data = await gRequest('POST',
@@ -198,6 +207,6 @@ app.post('/api/uppromote', async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v5 running');
+  console.log('Bearfoot proxy v6 running');
   setTimeout(keepAlive, 60 * 1000);
 });
