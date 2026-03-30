@@ -14,21 +14,21 @@ app.use((req, res, next) => {
 
 const CONFIG = {
   meta: {
-    token: 'EAARQ3HPftCIBQZCZCMucYRvSNC18PVBfc4V2fZBZB4pP2Ku4hefI3MUrBoeQrJG4tsZBsz38mnWvMieTDMF2g7bMSjjmAAjFsIounRiB9sbpEqZA6LtnpcptdWcWSw789MZAVdyopljt3xmcTDFptbARBU127oPVdd645djxkZBNiaM0tYCWodeU2ECvRqmFUwZDZD',
-    adAccount: 'act_378262932806675',
-    pageId: '441555446605737',
-    pixelId: '470255323754555'
+    token: process.env.META_TOKEN,
+    adAccount: process.env.META_AD_ACCOUNT || 'act_378262932806675',
+    pageId: process.env.META_PAGE_ID || '441555446605737',
+    pixelId: process.env.META_PIXEL_ID || '470255323754555'
   },
   google: {
-    developerToken: '9ROaoYVnG3mY8hWPdye5cw',
-    clientId: '6736684714-aas0ved9nrml829deu6d7jgf4j388p5s.apps.googleusercontent.com',
-    clientSecret: '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',
-    refreshToken: '1//04LHL5kmZkZnXCgYIARAAgAQSNwF-L9IrShx4wMHkN1pEMBljqZoGqRMVmjRj1b0c8K7BqasyfMCginGI4yCZY2MU77tpaWTlWxg',
-    managerAccountId: '4491645864',
-    clientAccountId: '8166793966'
+    developerToken: process.env.GOOGLE_DEVELOPER_TOKEN,
+    clientId: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
+    managerAccountId: process.env.GOOGLE_MANAGER_ACCOUNT_ID || '4491645864',
+    clientAccountId: process.env.GOOGLE_CLIENT_ACCOUNT_ID || '8166793966'
   },
   uppromote: {
-    apiKey: 'pk_sWoX5ITQqtJK829kGMPQw43LB4HDPXnW'
+    apiKey: process.env.UPPROMOTE_API_KEY
   }
 };
 
@@ -48,20 +48,6 @@ function keepAlive() {
   }).on('error', e => console.log('ping error:', e.message));
 }
 setInterval(keepAlive, 14 * 60 * 1000);
-
-// OAUTH CALLBACK - captures auth code for token regeneration
-let capturedOauthCode = null;
-app.get('/oauth/callback', (req, res) => {
-  capturedOauthCode = req.query.code || null;
-  if (capturedOauthCode) {
-    res.send('<h2>Authorization successful!</h2><p>Code captured. You can close this tab.</p>');
-  } else {
-    res.send('<h2>Error</h2><p>' + (req.query.error || 'No code received') + '</p>');
-  }
-});
-app.get('/oauth/get-code', (req, res) => {
-  res.json({ code: capturedOauthCode });
-});
 
 // META
 function metaRequest(method, path, body) {
@@ -212,6 +198,6 @@ app.post('/api/uppromote', async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v6 running');
+  console.log('Bearfoot proxy v5 running');
   setTimeout(keepAlive, 60 * 1000);
 });
