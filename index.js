@@ -6,7 +6,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
@@ -29,16 +29,8 @@ const CONFIG = {
   },
   uppromote: {
     apiKey: process.env.UPPROMOTE_API_KEY
-  },
-  shopify: {
-    clientId: process.env.SHOPIFY_CLIENT_ID,
-    clientSecret: process.env.SHOPIFY_CLIENT_SECRET,
-    shop: 'bearfoot-athletics.myshopify.com',
-    accessToken: process.env.SHOPIFY_ACCESS_TOKEN || null
   }
 };
-
-let shopifyToken = CONFIG.shopify.accessToken;
 
 app.get('/config', (req, res) => {
   res.json({
@@ -56,111 +48,6 @@ function keepAlive() {
   }).on('error', e => console.log('ping error:', e.message));
 }
 setInterval(keepAlive, 14 * 60 * 1000);
-
-// SHOPIFY OAUTH CALLBACK
-app.get('/auth/callback', (req, res) => {
-  const { code, shop } = req.query;
-  if (!code || !shop) return res.status(400).json({ error: 'Missing code or shop' });
-
-  const bodyStr = JSON.stringify({
-    client_id: CONFIG.shopify.clientId,
-    client_secret: CONFIG.shopify.clientSecret,
-    code
-  });
-
-  const opts = {
-    hostname: shop,
-    path: '/admin/oauth/access_token',
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(bodyStr)
-    }
-  };
-
-  const r2 = https.request(opts, r => {
-    let d = ''; r.on('data', c => d += c);
-    r.on('end', () => {
-      try {
-        const p = JSON.parse(d);
-        if (p.access_token) {
-          shopifyToken = p.access_token;
-          res.send('<h2>Token captured!</h2><p>Token: <code>' + p.access_token + '</code></p><p>Scope: ' + p.scope + '</p><p>Add this to Render as SHOPIFY_ACCESS_TOKEN</p>');
-        } else {
-          res.status(400).json({ error: 'No token in response', response: p });
-        }
-      } catch(e) {
-        res.status(500).json({ error: e.message });
-      }
-    });
-  });
-  r2.on('error', e => res.status(500).json({ error: e.message }));
-  r2.write(bodyStr);
-  r2.end();
-});
-
-app.get('/auth/token', (req, res) => {
-  if (shopifyToken) {
-    res.json({ token: shopifyToken });
-  } else {
-    res.status(404).json({ error: 'No Shopify token yet' });
-  }
-});
-
-// SHOPIFY API
-function shopifyRequest(method, path, body) {
-  const token = shopifyToken || CONFIG.shopify.accessToken;
-  if (!token) return Promise.reject(new Error('No Shopify access token configured'));
-  return new Promise((resolve, reject) => {
-    const bodyStr = body ? JSON.stringify(body) : null;
-    const opts = {
-      hostname: CONFIG.shopify.shop,
-      path,
-      method,
-      headers: {
-        'X-Shopify-Access-Token': token,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      }
-    };
-    if (bodyStr) opts.headers['Content-Length'] = Buffer.byteLength(bodyStr);
-    const req = https.request(opts, r => {
-      let d = ''; r.on('data', c => d += c);
-      r.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
-    });
-    req.on('error', reject);
-    if (bodyStr) req.write(bodyStr);
-    req.end();
-  });
-}
-
-app.get('/api/shopify', async (req, res) => {
-  const path = req.query.path;
-  if (!path) return res.status(400).json({ error: 'Missing path' });
-  try { res.json(await shopifyRequest('GET', path)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/shopify', async (req, res) => {
-  const path = req.query.path;
-  if (!path) return res.status(400).json({ error: 'Missing path' });
-  try { res.json(await shopifyRequest('POST', path, req.body)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
-});
-
-app.put('/api/shopify', async (req, res) => {
-  const path = req.query.path;
-  if (!path) return res.status(400).json({ error: 'Missing path' });
-  try { res.json(await shopifyRequest('PUT', path, req.body)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
-});
-
-app.delete('/api/shopify', async (req, res) => {
-  const path = req.query.path;
-  if (!path) return res.status(400).json({ error: 'Missing path' });
-  try { res.json(await shopifyRequest('DELETE', path)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
-});
 
 // META
 function metaRequest(method, path, body) {
@@ -275,6 +162,26 @@ app.post('/api/google/mutate', async (req, res) => {
     const data = await gRequest('POST',
       `/v20/customers/${CONFIG.google.clientAccountId}/${resource}:mutate`,
       { operations }
+    );
+    res.json(data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GOOGLE ADS - Policy Review Request
+app.post('/api/google/review', async (req, res) => {
+  let body = req.body || {};
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch(e) {}
+  }
+  let { resourceNames } = body;
+  if (typeof resourceNames === 'string') {
+    try { resourceNames = JSON.parse(resourceNames); } catch(e) {}
+  }
+  if (!resourceNames || !resourceNames.length) return res.status(400).json({ error: 'Missing resourceNames' });
+  try {
+    const data = await gRequest('POST',
+      `/v20/customers/${CONFIG.google.clientAccountId}/adGroupAds:requestReview`,
+      { resourceNames }
     );
     res.json(data);
   } catch(e) { res.status(500).json({ error: e.message }); }
