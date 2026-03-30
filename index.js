@@ -2,8 +2,21 @@ const express = require('express');
 const https = require('https');
 const app = express();
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Universal body parser — reads raw stream, tries JSON then urlencoded
+// Works regardless of Content-Type header (handles Zapier's non-standard behavior)
+app.use((req, res, next) => {
+  let data = Buffer.alloc(0);
+  req.on('data', chunk => { data = Buffer.concat([data, chunk]); });
+  req.on('end', () => {
+    const str = data.toString('utf8').trim();
+    if (!str) { req.body = {}; return next(); }
+    try { req.body = JSON.parse(str); return next(); } catch(e) {}
+    try { req.body = Object.fromEntries(new URLSearchParams(str)); return next(); } catch(e) {}
+    req.body = str;
+    next();
+  });
+});
+
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
@@ -39,7 +52,7 @@ app.get('/config', (req, res) => {
   });
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v10' }));
 
 // DEBUG — echo body, query, content-type
 app.post('/api/debug', (req, res) => {
@@ -245,6 +258,6 @@ app.post('/api/uppromote', async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v9 running');
+  console.log('Bearfoot proxy v10 running');
   setTimeout(keepAlive, 5000);
 });
