@@ -168,16 +168,38 @@ app.post('/api/google/mutate', async (req, res) => {
 });
 
 // GOOGLE ADS - Policy Review Request
+// Accepts: names=comma,separated,resource,names (form-friendly)
+// OR: resourceNames as JSON array in body
 app.post('/api/google/review', async (req, res) => {
   let body = req.body || {};
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch(e) {}
   }
-  let { resourceNames } = body;
-  if (typeof resourceNames === 'string') {
-    try { resourceNames = JSON.parse(resourceNames); } catch(e) {}
+
+  let resourceNames = null;
+
+  // Try comma-separated string (most form-friendly)
+  if (body.names && typeof body.names === 'string') {
+    resourceNames = body.names.split(',').map(s => s.trim()).filter(Boolean);
   }
-  if (!resourceNames || !resourceNames.length) return res.status(400).json({ error: 'Missing resourceNames' });
+  // Try resourceNames as array
+  else if (body.resourceNames) {
+    resourceNames = body.resourceNames;
+    if (typeof resourceNames === 'string') {
+      try { resourceNames = JSON.parse(resourceNames); } catch(e) {
+        resourceNames = resourceNames.split(',').map(s => s.trim()).filter(Boolean);
+      }
+    }
+  }
+  // Try query params
+  else if (req.query.names) {
+    resourceNames = req.query.names.split(',').map(s => s.trim()).filter(Boolean);
+  }
+
+  if (!resourceNames || !resourceNames.length) {
+    return res.status(400).json({ error: 'Missing resourceNames — send as names=r1,r2,r3 or resourceNames array' });
+  }
+
   try {
     const data = await gRequest('POST',
       `/v20/customers/${CONFIG.google.clientAccountId}/adGroupAds:requestReview`,
@@ -225,6 +247,6 @@ app.post('/api/uppromote', async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v7 running');
+  console.log('Bearfoot proxy v8 running');
   setTimeout(keepAlive, 5000);
 });
