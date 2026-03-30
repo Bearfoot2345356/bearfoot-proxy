@@ -49,6 +49,20 @@ function keepAlive() {
 }
 setInterval(keepAlive, 14 * 60 * 1000);
 
+// OAUTH CALLBACK - captures auth code for token regeneration
+let capturedOauthCode = null;
+app.get('/oauth/callback', (req, res) => {
+  capturedOauthCode = req.query.code || null;
+  if (capturedOauthCode) {
+    res.send('<h2>Authorization successful!</h2><p>Code captured. You can close this tab.</p>');
+  } else {
+    res.send('<h2>Error</h2><p>' + (req.query.error || 'No code received') + '</p>');
+  }
+});
+app.get('/oauth/get-code', (req, res) => {
+  res.json({ code: capturedOauthCode });
+});
+
 // META
 function metaRequest(method, path, body) {
   return new Promise((resolve, reject) => {
@@ -198,6 +212,6 @@ app.post('/api/uppromote', async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v5 running');
+  console.log('Bearfoot proxy v6 running');
   setTimeout(keepAlive, 60 * 1000);
 });
