@@ -141,7 +141,7 @@ app.post('/api/google/query', async (req, res) => {
   if (!query) return res.status(400).json({ error: 'Missing query' });
   try {
     const data = await gRequest('POST',
-      `/v17/customers/${CONFIG.google.clientAccountId}/googleAds:searchStream`,
+      `/v20/customers/${CONFIG.google.clientAccountId}/googleAds:searchStream`,
       { query }
     );
     res.json(data);
@@ -153,7 +153,7 @@ app.post('/api/google/mutate', async (req, res) => {
   if (!operations) return res.status(400).json({ error: 'Missing operations' });
   try {
     const data = await gRequest('POST',
-      `/v17/customers/${CONFIG.google.clientAccountId}/${resource}:mutate`,
+      `/v20/customers/${CONFIG.google.clientAccountId}/${resource}:mutate`,
       { operations }
     );
     res.json(data);
@@ -198,6 +198,6 @@ app.post('/api/uppromote', async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v4 running');
+  console.log('Bearfoot proxy v5 running');
   setTimeout(keepAlive, 60 * 1000);
 });
