@@ -3,7 +3,6 @@ const https = require('https');
 const app = express();
 
 // Universal body parser — reads raw stream, tries JSON then urlencoded
-// Works regardless of Content-Type header (handles Zapier's non-standard behavior)
 app.use((req, res, next) => {
   let data = Buffer.alloc(0);
   req.on('data', chunk => { data = Buffer.concat([data, chunk]); });
@@ -52,9 +51,8 @@ app.get('/config', (req, res) => {
   });
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v10' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v11' }));
 
-// DEBUG — echo body, query, content-type
 app.post('/api/debug', (req, res) => {
   res.json({ body: req.body, query: req.query, contentType: req.headers['content-type'] });
 });
@@ -168,13 +166,9 @@ app.post('/api/google/query', async (req, res) => {
 
 app.post('/api/google/mutate', async (req, res) => {
   let body = req.body || {};
-  if (typeof body === 'string') {
-    try { body = JSON.parse(body); } catch(e) {}
-  }
+  if (typeof body === 'string') { try { body = JSON.parse(body); } catch(e) {} }
   let { resource, operations } = body;
-  if (typeof operations === 'string') {
-    try { operations = JSON.parse(operations); } catch(e) {}
-  }
+  if (typeof operations === 'string') { try { operations = JSON.parse(operations); } catch(e) {} }
   if (!operations) return res.status(400).json({ error: 'Missing operations' });
   try {
     const data = await gRequest('POST',
@@ -185,15 +179,12 @@ app.post('/api/google/mutate', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// GOOGLE ADS - Policy Review Request
-app.post('/api/google/review', async (req, res) => {
+// Policy review — also available at /review as fallback
+async function handleReview(req, res) {
   let body = req.body || {};
-  if (typeof body === 'string') {
-    try { body = JSON.parse(body); } catch(e) {}
-  }
+  if (typeof body === 'string') { try { body = JSON.parse(body); } catch(e) {} }
 
   let resourceNames = null;
-
   if (body.names && typeof body.names === 'string') {
     resourceNames = body.names.split(',').map(s => s.trim()).filter(Boolean);
   } else if (body.resourceNames) {
@@ -208,7 +199,7 @@ app.post('/api/google/review', async (req, res) => {
   }
 
   if (!resourceNames || !resourceNames.length) {
-    return res.status(400).json({ error: 'Missing resourceNames', receivedBody: body, receivedQuery: req.query });
+    return res.status(400).json({ error: 'Missing resourceNames', receivedBody: body });
   }
 
   try {
@@ -218,7 +209,10 @@ app.post('/api/google/review', async (req, res) => {
     );
     res.json(data);
   } catch(e) { res.status(500).json({ error: e.message }); }
-});
+}
+
+app.post('/api/google/review', handleReview);
+app.post('/review', handleReview);  // top-level fallback path
 
 // UPPROMOTE
 function uppromoteRequest(method, path, body) {
@@ -228,11 +222,7 @@ function uppromoteRequest(method, path, body) {
       hostname: 'aff-api.uppromote.com',
       path: `/api/v2${path}`,
       method,
-      headers: {
-        'Authorization': CONFIG.uppromote.apiKey,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      }
+      headers: { 'Authorization': CONFIG.uppromote.apiKey, 'Accept': 'application/json', 'Content-Type': 'application/json' }
     };
     if (bodyStr) options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
     const req = https.request(options, r => {
@@ -258,6 +248,6 @@ app.post('/api/uppromote', async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v10 running');
+  console.log('Bearfoot proxy v11 running');
   setTimeout(keepAlive, 5000);
 });
