@@ -41,6 +41,11 @@ app.get('/config', (req, res) => {
 
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
+// DEBUG — echo body, query, content-type
+app.post('/api/debug', (req, res) => {
+  res.json({ body: req.body, query: req.query, contentType: req.headers['content-type'] });
+});
+
 function keepAlive() {
   https.get('https://bearfoot-proxy.onrender.com/health', (r) => {
     let d = ''; r.on('data', c => d += c);
@@ -168,8 +173,6 @@ app.post('/api/google/mutate', async (req, res) => {
 });
 
 // GOOGLE ADS - Policy Review Request
-// Accepts: names=comma,separated,resource,names (form-friendly)
-// OR: resourceNames as JSON array in body
 app.post('/api/google/review', async (req, res) => {
   let body = req.body || {};
   if (typeof body === 'string') {
@@ -178,26 +181,21 @@ app.post('/api/google/review', async (req, res) => {
 
   let resourceNames = null;
 
-  // Try comma-separated string (most form-friendly)
   if (body.names && typeof body.names === 'string') {
     resourceNames = body.names.split(',').map(s => s.trim()).filter(Boolean);
-  }
-  // Try resourceNames as array
-  else if (body.resourceNames) {
+  } else if (body.resourceNames) {
     resourceNames = body.resourceNames;
     if (typeof resourceNames === 'string') {
       try { resourceNames = JSON.parse(resourceNames); } catch(e) {
         resourceNames = resourceNames.split(',').map(s => s.trim()).filter(Boolean);
       }
     }
-  }
-  // Try query params
-  else if (req.query.names) {
+  } else if (req.query.names) {
     resourceNames = req.query.names.split(',').map(s => s.trim()).filter(Boolean);
   }
 
   if (!resourceNames || !resourceNames.length) {
-    return res.status(400).json({ error: 'Missing resourceNames — send as names=r1,r2,r3 or resourceNames array' });
+    return res.status(400).json({ error: 'Missing resourceNames', receivedBody: body, receivedQuery: req.query });
   }
 
   try {
@@ -247,6 +245,6 @@ app.post('/api/uppromote', async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v8 running');
+  console.log('Bearfoot proxy v9 running');
   setTimeout(keepAlive, 5000);
 });
