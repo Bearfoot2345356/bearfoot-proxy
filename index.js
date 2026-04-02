@@ -51,7 +51,9 @@ const CONFIG = {
   },
   tiktok: {
     accessToken: process.env.TIKTOK_ACCESS_TOKEN,
-    advertiserId: process.env.TIKTOK_ADVERTISER_ID || '1813169868034049'
+    advertiserId: process.env.TIKTOK_ADVERTISER_ID || '1813169868034049',
+    appId: process.env.TIKTOK_APP_ID || '7622939461445222401',
+    appSecret: process.env.TIKTOK_APP_SECRET
   }
 };
 
@@ -60,7 +62,7 @@ app.get('/config', (req, res) => res.json({
   google: { managerAccountId: CONFIG.google.managerAccountId, clientAccountId: CONFIG.google.clientAccountId }
 }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v13' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v14' }));
 
 app.post('/api/debug', (req, res) => {
   res.json({ body: req.body, query: req.query, contentType: req.headers['content-type'] });
@@ -406,7 +408,40 @@ app.post('/api/tiktok', async (req, res) => {
   catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// TIKTOK OAUTH CALLBACK
+app.get('/', async (req, res) => {
+  const authCode = req.query.auth_code;
+  if (!authCode) {
+    return res.send('<h2>Bearfoot Proxy v14 running</h2><p>No auth_code present.</p>');
+  }
+  try {
+    const body = JSON.stringify({
+      app_id: CONFIG.tiktok.appId,
+      secret: CONFIG.tiktok.appSecret,
+      auth_code: authCode
+    });
+    const token = await new Promise((resolve, reject) => {
+      const opts = {
+        hostname: 'business-api.tiktok.com',
+        path: '/open_api/v1.3/oauth2/access_token/',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+      };
+      const req2 = https.request(opts, r => {
+        let d = ''; r.on('data', c => d += c);
+        r.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
+      });
+      req2.on('error', reject);
+      req2.write(body);
+      req2.end();
+    });
+    res.send('<h2>TikTok Token Exchange Result</h2><pre>' + JSON.stringify(token, null, 2) + '</pre>');
+  } catch(e) {
+    res.status(500).send('<h2>Error</h2><pre>' + e.message + '</pre>');
+  }
+});
+
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v13 running');
+  console.log('Bearfoot proxy v14 running');
   setTimeout(keepAlive, 5000);
 });
