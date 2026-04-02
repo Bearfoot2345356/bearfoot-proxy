@@ -51,7 +51,7 @@ const CONFIG = {
   },
   tiktok: {
     accessToken: process.env.TIKTOK_ACCESS_TOKEN,
-    advertiserId: process.env.TIKTOK_ADVERTISER_ID || '1813169868034049',
+    advertiserId: process.env.TIKTOK_ADVERTISER_ID || '7257567360448593921',
     appId: process.env.TIKTOK_APP_ID || '7622939461445222401',
     appSecret: process.env.TIKTOK_APP_SECRET
   }
@@ -62,7 +62,7 @@ app.get('/config', (req, res) => res.json({
   google: { managerAccountId: CONFIG.google.managerAccountId, clientAccountId: CONFIG.google.clientAccountId }
 }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v14' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v15' }));
 
 app.post('/api/debug', (req, res) => {
   res.json({ body: req.body, query: req.query, contentType: req.headers['content-type'] });
@@ -153,11 +153,8 @@ async function gRequest(method, path, body) {
     const req = https.request(opts, r => {
       let d = ''; r.on('data', c => d += c);
       r.on('end', () => {
-        try {
-          resolve(JSON.parse(d));
-        } catch(e) {
-          resolve({ _rawResponse: d.substring(0, 500), _statusCode: r.statusCode, _parseError: e.message });
-        }
+        try { resolve(JSON.parse(d)); }
+        catch(e) { resolve({ _rawResponse: d.substring(0, 500), _statusCode: r.statusCode, _parseError: e.message }); }
       });
     });
     req.on('error', reject);
@@ -190,7 +187,6 @@ app.post('/api/google/mutate', async (req, res) => {
 async function handleReview(req, res) {
   let body = req.body || {};
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch(e) {} }
-
   let resourceNames = null;
   if (body.names && typeof body.names === 'string') {
     resourceNames = body.names.split(',').map(s => s.trim()).filter(Boolean);
@@ -204,11 +200,9 @@ async function handleReview(req, res) {
   } else if (req.query.names) {
     resourceNames = req.query.names.split(',').map(s => s.trim()).filter(Boolean);
   }
-
   if (!resourceNames || !resourceNames.length) {
     return res.status(400).json({ error: 'Missing resourceNames', receivedBody: body });
   }
-
   try {
     const data = await gRequest('POST',
       `/v20/customers/${CONFIG.google.clientAccountId}/adGroupAds:requestReview`,
@@ -244,24 +238,18 @@ app.get('/api/uppromote', async (req, res) => {
   const path = req.query.path || '/affiliates';
   try { res.json(await uppromoteRequest('GET', path)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
-
 app.post('/api/uppromote', async (req, res) => {
   const path = req.query.path || '/affiliates';
   try { res.json(await uppromoteRequest('POST', path, req.body)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// X ORGANIC (Twitter v2 - Bearer Token)
+// X ORGANIC (Twitter v2)
 async function twitterRequest(method, path, body = null) {
   const bodyStr = body ? JSON.stringify(body) : null;
   return new Promise((resolve, reject) => {
     const opts = {
-      hostname: 'api.twitter.com',
-      path,
-      method,
-      headers: {
-        'Authorization': `Bearer ${CONFIG.x.bearerToken}`,
-        'Content-Type': 'application/json'
-      }
+      hostname: 'api.twitter.com', path, method,
+      headers: { 'Authorization': `Bearer ${CONFIG.x.bearerToken}`, 'Content-Type': 'application/json' }
     };
     if (bodyStr) opts.headers['Content-Length'] = Buffer.byteLength(bodyStr);
     const req = https.request(opts, r => {
@@ -277,23 +265,20 @@ async function twitterRequest(method, path, body = null) {
 app.get('/api/twitter', async (req, res) => {
   const path = req.query.path;
   if (!path) return res.status(400).json({ error: 'Missing path' });
-  try { res.json(await twitterRequest('GET', path)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await twitterRequest('GET', path)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/twitter', async (req, res) => {
   const path = req.query.path;
   if (!path) return res.status(400).json({ error: 'Missing path' });
-  try { res.json(await twitterRequest('POST', path, req.body)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await twitterRequest('POST', path, req.body)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 app.delete('/api/twitter', async (req, res) => {
   const path = req.query.path;
   if (!path) return res.status(400).json({ error: 'Missing path' });
-  try { res.json(await twitterRequest('DELETE', path)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await twitterRequest('DELETE', path)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// X ADS (OAuth 1.0a - independent of Bearer Token)
+// X ADS (OAuth 1.0a)
 function xAdsOAuth1Header(method, url, queryParams = {}) {
   const oauthParams = {
     oauth_consumer_key: CONFIG.x.apiKey,
@@ -324,9 +309,7 @@ async function xAdsRequest(method, path, queryParams = {}, body = null) {
   const bodyStr = body ? JSON.stringify(body) : null;
   return new Promise((resolve, reject) => {
     const opts = {
-      hostname: 'ads-api.twitter.com',
-      path: path + qs,
-      method,
+      hostname: 'ads-api.twitter.com', path: path + qs, method,
       headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }
     };
     if (bodyStr) opts.headers['Content-Length'] = Buffer.byteLength(bodyStr);
@@ -356,14 +339,12 @@ app.get('/api/xads', async (req, res) => {
   const path = req.query.path;
   if (!path) return res.status(400).json({ error: 'Missing path' });
   const { path: _, ...params } = req.query;
-  try { res.json(await xAdsRequest('GET', path, params)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await xAdsRequest('GET', path, params)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/xads', async (req, res) => {
   const path = req.query.path;
   if (!path) return res.status(400).json({ error: 'Missing path' });
-  try { res.json(await xAdsRequest('POST', path, {}, req.body)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await xAdsRequest('POST', path, {}, req.body)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // TIKTOK ADS
@@ -371,13 +352,8 @@ async function tiktokRequest(method, path, body = null) {
   const bodyStr = body ? JSON.stringify(body) : null;
   return new Promise((resolve, reject) => {
     const opts = {
-      hostname: 'business-api.tiktok.com',
-      path,
-      method,
-      headers: {
-        'Access-Token': CONFIG.tiktok.accessToken,
-        'Content-Type': 'application/json'
-      }
+      hostname: 'business-api.tiktok.com', path, method,
+      headers: { 'Access-Token': CONFIG.tiktok.accessToken, 'Content-Type': 'application/json' }
     };
     if (bodyStr) opts.headers['Content-Length'] = Buffer.byteLength(bodyStr);
     const req = https.request(opts, r => {
@@ -391,28 +367,70 @@ async function tiktokRequest(method, path, body = null) {
 }
 
 app.get('/api/tiktok/campaigns', async (req, res) => {
-  try {
-    res.json(await tiktokRequest('GET', `/open_api/v1.3/campaign/get/?advertiser_id=${CONFIG.tiktok.advertiserId}`));
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await tiktokRequest('GET', `/open_api/v1.3/campaign/get/?advertiser_id=${CONFIG.tiktok.advertiserId}`)); }
+  catch(e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/tiktok', async (req, res) => {
   const path = req.query.path;
   if (!path) return res.status(400).json({ error: 'Missing path' });
-  try { res.json(await tiktokRequest('GET', path)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await tiktokRequest('GET', path)); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/tiktok', async (req, res) => {
   const path = req.query.path;
   if (!path) return res.status(400).json({ error: 'Missing path' });
-  try { res.json(await tiktokRequest('POST', path, req.body)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await tiktokRequest('POST', path, req.body)); } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// TIKTOK COVER IMAGE UPLOAD (downloads from URL and uploads as multipart)
+app.post('/api/tiktok/upload-image', async (req, res) => {
+  const { image_url, advertiser_id } = req.body;
+  if (!image_url || !advertiser_id) return res.status(400).json({ error: 'Missing image_url or advertiser_id' });
+  try {
+    const imageBuffer = await new Promise((resolve, reject) => {
+      const protocol = image_url.startsWith('https') ? https : require('http');
+      const chunks = [];
+      protocol.get(image_url, r => {
+        r.on('data', c => chunks.push(c));
+        r.on('end', () => resolve(Buffer.concat(chunks)));
+      }).on('error', reject);
+    });
+    const boundary = 'BearfootBoundary' + Date.now();
+    const CRLF = '\r\n';
+    const headerParts = [
+      `--${boundary}${CRLF}Content-Disposition: form-data; name="advertiser_id"${CRLF}${CRLF}${advertiser_id}${CRLF}`,
+      `--${boundary}${CRLF}Content-Disposition: form-data; name="upload_type"${CRLF}${CRLF}UPLOAD_BY_FILE${CRLF}`,
+      `--${boundary}${CRLF}Content-Disposition: form-data; name="image_file"; filename="cover.jpg"${CRLF}Content-Type: image/jpeg${CRLF}${CRLF}`
+    ].join('');
+    const footer = `${CRLF}--${boundary}--${CRLF}`;
+    const body = Buffer.concat([Buffer.from(headerParts), imageBuffer, Buffer.from(footer)]);
+    const result = await new Promise((resolve, reject) => {
+      const opts = {
+        hostname: 'business-api.tiktok.com',
+        path: '/open_api/v1.3/file/image/ad/upload/',
+        method: 'POST',
+        headers: {
+          'Access-Token': CONFIG.tiktok.accessToken,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length
+        }
+      };
+      const req2 = https.request(opts, r => {
+        let d = ''; r.on('data', c => d += c);
+        r.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({ _raw: d.substring(0, 500) }); } });
+      });
+      req2.on('error', reject);
+      req2.write(body);
+      req2.end();
+    });
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // TIKTOK OAUTH CALLBACK
 app.get('/', async (req, res) => {
   const authCode = req.query.auth_code;
   if (!authCode) {
-    return res.send('<h2>Bearfoot Proxy v14 running</h2><p>No auth_code present.</p>');
+    return res.send('<h2>Bearfoot Proxy v15 running</h2><p>No auth_code present.</p>');
   }
   try {
     const body = JSON.stringify({
@@ -442,6 +460,6 @@ app.get('/', async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log('Bearfoot proxy v14 running');
+  console.log('Bearfoot proxy v15 running');
   setTimeout(keepAlive, 5000);
 });
