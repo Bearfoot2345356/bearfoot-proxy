@@ -34,7 +34,7 @@ const CONFIG = {
 };
 
 app.get('/config', (req, res) => res.json({ meta: { adAccount: CONFIG.meta.adAccount, pageId: CONFIG.meta.pageId }, google: { managerAccountId: CONFIG.google.managerAccountId, clientAccountId: CONFIG.google.clientAccountId } }));
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v23' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v24' }));
 app.post('/api/debug', (req, res) => res.json({ body: req.body, query: req.query, contentType: req.headers['content-type'] }));
 
 const THUMB_B64 = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAFA3PE84MlBGQUZaVVBfeМiCeG5uePWvuZHI////////////////////////////2wBDAVVaWnhpeOuCguv////////////////////////////wAARCAeABDgDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAAfxAAUAQEAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKwAB/9k=';
@@ -135,18 +135,20 @@ app.post('/api/meta/image-upload', async (req, res) => {
 });
 
 // SHOPIFY
-app.get('/api/shopify', async (req, res) => {
-  const path = req.query.path;
-  if (!path) return res.status(400).json({ error: 'Missing path' });
-  try {
-    const result = await new Promise((resolve, reject) => {
-      const opts = { hostname: CONFIG.shopify.shop, path: `/admin/api/${CONFIG.shopify.apiVersion}/${decodeURIComponent(path)}`, method: 'GET', headers: { 'X-Shopify-Access-Token': CONFIG.shopify.accessToken, 'Content-Type': 'application/json' } };
-      const r = https.request(opts, res2 => { let d=''; res2.on('data',c=>d+=c); res2.on('end',()=>{ try { resolve(JSON.parse(d)); } catch(e) { resolve({ _raw: d.substring(0,500) }); } }); });
-      r.on('error', reject); r.end();
-    });
-    res.json(result);
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
+async function shopifyRequest(method, path, body = null) {
+  const bodyStr = body ? JSON.stringify(body) : null;
+  return new Promise((resolve, reject) => {
+    const opts = { hostname: CONFIG.shopify.shop, path: `/admin/api/${CONFIG.shopify.apiVersion}/${path}`, method, headers: { 'X-Shopify-Access-Token': CONFIG.shopify.accessToken, 'Content-Type': 'application/json' } };
+    if (bodyStr) opts.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+    const r = https.request(opts, res2 => { let d=''; res2.on('data',c=>d+=c); res2.on('end',()=>{ try { resolve(JSON.parse(d)); } catch(e) { resolve({ _raw: d.substring(0,500) }); } }); });
+    r.on('error', reject);
+    if (bodyStr) r.write(bodyStr);
+    r.end();
+  });
+}
+app.get('/api/shopify', async (req, res) => { const path = req.query.path; if (!path) return res.status(400).json({ error: 'Missing path' }); try { res.json(await shopifyRequest('GET', decodeURIComponent(path))); } catch(e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/shopify', async (req, res) => { const path = req.query.path; if (!path) return res.status(400).json({ error: 'Missing path' }); try { res.json(await shopifyRequest('POST', decodeURIComponent(path), req.body)); } catch(e) { res.status(500).json({ error: e.message }); } });
+app.delete('/api/shopify', async (req, res) => { const path = req.query.path; if (!path) return res.status(400).json({ error: 'Missing path' }); try { res.json(await shopifyRequest('DELETE', decodeURIComponent(path))); } catch(e) { res.status(500).json({ error: e.message }); } });
 
 // TIKTOK
 async function tiktokRequest(method, path, body = null) {
@@ -287,7 +289,7 @@ app.post('/api/capi/order', async (req, res) => {
 // TIKTOK OAUTH CALLBACK
 app.get('/', async (req, res) => {
   const authCode = req.query.auth_code;
-  if (!authCode) return res.send('<h2>Bearfoot Proxy v23 running</h2>');
+  if (!authCode) return res.send('<h2>Bearfoot Proxy v24 running</h2>');
   try {
     const body = JSON.stringify({ app_id: CONFIG.tiktok.appId, secret: CONFIG.tiktok.appSecret, auth_code: authCode });
     const token = await new Promise((resolve, reject) => {
@@ -366,4 +368,4 @@ app.get('/api/reddit', async (req, res) => { const path = req.query.path; if (!p
 app.post('/api/reddit', async (req, res) => { const path = req.query.path; if (!path) return res.status(400).json({ error: 'Missing path' }); try { res.json(await redditRequest('POST', path, req.body)); } catch(e) { res.status(500).json({ error: e.message }); } });
 
 function keepAlive() { https.get('https://bearfoot-proxy.onrender.com/health', () => {}).on('error', () => {}); setTimeout(keepAlive, 840000); }
-app.listen(process.env.PORT || 3000, () => { console.log('Bearfoot proxy v23 running'); setTimeout(keepAlive, 5000); });
+app.listen(process.env.PORT || 3000, () => { console.log('Bearfoot proxy v24 running'); setTimeout(keepAlive, 5000); });
