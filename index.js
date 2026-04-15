@@ -29,12 +29,13 @@ const CONFIG = {
   google: { developerToken: process.env.GOOGLE_DEVELOPER_TOKEN, clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET, refreshToken: process.env.GOOGLE_REFRESH_TOKEN, managerAccountId: process.env.GOOGLE_MANAGER_ACCOUNT_ID || '4491645864', clientAccountId: process.env.GOOGLE_CLIENT_ACCOUNT_ID || '8166793966' },
   uppromote: { apiKey: process.env.UPPROMOTE_API_KEY },
   x: { apiKey: process.env.X_API_KEY, apiSecret: process.env.X_API_SECRET, accessToken: process.env.X_ACCESS_TOKEN, accessTokenSecret: process.env.X_ACCESS_TOKEN_SECRET, bearerToken: process.env.X_BEARER_TOKEN, adsAccountId: process.env.X_ADS_ACCOUNT_ID || '18ce55nt6zg' },
+  xPixelId: process.env.X_PIXEL_ID || 'olm57',
   shopify: { accessToken: process.env.SHOPIFY_ACCESS_TOKEN, shop: 'bearfoot-athletics.myshopify.com', apiVersion: '2024-01' },
   tiktok: { accessToken: process.env.TIKTOK_ACCESS_TOKEN, advertiserId: process.env.TIKTOK_ADVERTISER_ID || '7257567360448593921', appId: process.env.TIKTOK_APP_ID || '7622939461445222401', appSecret: process.env.TIKTOK_APP_SECRET }
 };
 
 app.get('/config', (req, res) => res.json({ meta: { adAccount: CONFIG.meta.adAccount, pageId: CONFIG.meta.pageId }, google: { managerAccountId: CONFIG.google.managerAccountId, clientAccountId: CONFIG.google.clientAccountId } }));
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v27' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v28' }));
 app.post('/api/debug', (req, res) => res.json({ body: req.body, query: req.query, contentType: req.headers['content-type'] }));
 
 // GOOGLE ADS
@@ -305,10 +306,48 @@ app.post('/api/capi/order', async (req, res) => {
   }
 });
 
+// X CONVERSIONS API
+app.post('/api/capi/x-order', async (req, res) => {
+  try {
+    const order = req.body;
+    const customer = order.customer || {};
+    const addr = (order.billing_address || order.shipping_address || {});
+    const identifiers = [];
+    if (customer.email) identifiers.push({ hashed_email: sha256(customer.email) });
+    const phone = customer.phone || addr.phone;
+    if (phone) identifiers.push({ hashed_phone_number: sha256(phone.replace(/\D/g, '')) });
+    const pixelId = CONFIG.xPixelId;
+    const conversionTime = new Date().toISOString().replace(/\.\d{3}Z$/, '.000Z');
+    const body = JSON.stringify({
+      conversions: [{
+        conversion_time: conversionTime,
+        event_id: 'order_' + order.id,
+        conversion_type: 'Purchase',
+        value: parseFloat(order.total_price || 0),
+        currency: order.currency || 'USD',
+        identifiers
+      }]
+    });
+    const url = 'https://ads-api.twitter.com/11/measurement/conversions/' + pixelId;
+    const authHeader = oauthSign('POST', url, {}, CONFIG.x.apiKey, CONFIG.x.apiSecret, CONFIG.x.accessToken, CONFIG.x.accessTokenSecret);
+    const result = await new Promise((resolve, reject) => {
+      const u = new URL(url);
+      const opts = { hostname: u.hostname, path: u.pathname, method: 'POST', headers: { 'Authorization': authHeader, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } };
+      const r = https.request(opts, res2 => { let d=''; res2.on('data',c=>d+=c); res2.on('end',()=>{ try { resolve(JSON.parse(d)); } catch(e) { resolve({ _raw: d.substring(0,500) }); } }); });
+      r.on('error', reject); r.write(body); r.end();
+    });
+    console.log('X CAPI Purchase order', order.id, ':', JSON.stringify(result));
+    res.json({ ok: true, order_id: order.id, x_capi_result: result });
+  } catch(e) {
+    console.error('X CAPI error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // TIKTOK OAUTH CALLBACK
 app.get('/', async (req, res) => {
   const authCode = req.query.auth_code;
-  if (!authCode) return res.send('<h2>Bearfoot Proxy v27 running</h2>');
+  if (!authCode) return res.send('<h2>Bearfoot Proxy v28 running</h2>');
   try {
     const body = JSON.stringify({ app_id: CONFIG.tiktok.appId, secret: CONFIG.tiktok.appSecret, auth_code: authCode });
     const token = await new Promise((resolve, reject) => {
@@ -456,4 +495,4 @@ app.post('/api/gcloud/services/enable', async (req, res) => {
 });
 
 function keepAlive() { https.get('https://bearfoot-proxy.onrender.com/health', () => {}).on('error', () => {}); setTimeout(keepAlive, 840000); }
-app.listen(process.env.PORT || 3000, () => { console.log('Bearfoot proxy v27 running'); setTimeout(keepAlive, 5000); });
+app.listen(process.env.PORT || 3000, () => { console.log('Bearfoot proxy v28 running'); setTimeout(keepAlive, 5000); });
