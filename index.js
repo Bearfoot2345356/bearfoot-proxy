@@ -34,7 +34,7 @@ const CONFIG = {
 };
 
 app.get('/config', (req, res) => res.json({ meta: { adAccount: CONFIG.meta.adAccount, pageId: CONFIG.meta.pageId }, google: { managerAccountId: CONFIG.google.managerAccountId, clientAccountId: CONFIG.google.clientAccountId } }));
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v26' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v27' }));
 app.post('/api/debug', (req, res) => res.json({ body: req.body, query: req.query, contentType: req.headers['content-type'] }));
 
 // GOOGLE ADS
@@ -308,7 +308,7 @@ app.post('/api/capi/order', async (req, res) => {
 // TIKTOK OAUTH CALLBACK
 app.get('/', async (req, res) => {
   const authCode = req.query.auth_code;
-  if (!authCode) return res.send('<h2>Bearfoot Proxy v26 running</h2>');
+  if (!authCode) return res.send('<h2>Bearfoot Proxy v27 running</h2>');
   try {
     const body = JSON.stringify({ app_id: CONFIG.tiktok.appId, secret: CONFIG.tiktok.appSecret, auth_code: authCode });
     const token = await new Promise((resolve, reject) => {
@@ -324,7 +324,7 @@ app.get('/', async (req, res) => {
 app.get('/auth/google/start', (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const redirectUri = 'https://bearfoot-proxy.onrender.com/auth/google';
-  const scopes = ['https://www.googleapis.com/auth/adwords', 'https://www.googleapis.com/auth/content', 'https://www.googleapis.com/auth/analytics.readonly', 'https://www.googleapis.com/auth/tagmanager.readonly'].join(' ');
+  const scopes = ['https://www.googleapis.com/auth/adwords', 'https://www.googleapis.com/auth/content', 'https://www.googleapis.com/auth/analytics.readonly', 'https://www.googleapis.com/auth/tagmanager.readonly', 'https://www.googleapis.com/auth/cloudplatformprojects', 'https://www.googleapis.com/auth/cloud-platform'].join(' ');
   const url = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=' + clientId + '&redirect_uri=' + encodeURIComponent(redirectUri) + '&response_type=code&scope=' + encodeURIComponent(scopes) + '&access_type=offline&prompt=consent';
   res.redirect(url);
 });
@@ -426,5 +426,34 @@ app.get('/api/gtm/tags', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// CLOUD RESOURCE MANAGER API
+app.get('/api/gcloud/services', async (req, res) => {
+  const { project } = req.query;
+  const projectId = project || 'hardy-audio-478818-g3';
+  try {
+    const token = await getGToken();
+    const result = await new Promise((resolve, reject) => {
+      const opts = { hostname: 'serviceusage.googleapis.com', path: '/v1/projects/' + projectId + '/services?pageSize=200&filter=state:ENABLED', method: 'GET', headers: { 'Authorization': 'Bearer ' + token } };
+      const r = https.request(opts, res2 => { let d=''; res2.on('data',c=>d+=c); res2.on('end',()=>{ try { resolve(JSON.parse(d)); } catch(e) { resolve({ _raw: d.substring(0,1000) }); } }); });
+      r.on('error', reject); r.end();
+    });
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/gcloud/services/enable', async (req, res) => {
+  const { service, project } = req.body;
+  if (!service) return res.status(400).json({ error: 'Missing service' });
+  const projectId = project || 'hardy-audio-478818-g3';
+  try {
+    const token = await getGToken();
+    const result = await new Promise((resolve, reject) => {
+      const opts = { hostname: 'serviceusage.googleapis.com', path: '/v1/projects/' + projectId + '/services/' + service + ':enable', method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Content-Length': 2 } };
+      const r = https.request(opts, res2 => { let d=''; res2.on('data',c=>d+=c); res2.on('end',()=>{ try { resolve(JSON.parse(d)); } catch(e) { resolve({ _raw: d.substring(0,1000) }); } }); });
+      r.on('error', reject); r.write('{}'); r.end();
+    });
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 function keepAlive() { https.get('https://bearfoot-proxy.onrender.com/health', () => {}).on('error', () => {}); setTimeout(keepAlive, 840000); }
-app.listen(process.env.PORT || 3000, () => { console.log('Bearfoot proxy v26 running'); setTimeout(keepAlive, 5000); });
+app.listen(process.env.PORT || 3000, () => { console.log('Bearfoot proxy v27 running'); setTimeout(keepAlive, 5000); });
