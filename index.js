@@ -35,7 +35,7 @@ const CONFIG = {
 };
 
 app.get('/config', (req, res) => res.json({ meta: { adAccount: CONFIG.meta.adAccount, pageId: CONFIG.meta.pageId }, google: { managerAccountId: CONFIG.google.managerAccountId, clientAccountId: CONFIG.google.clientAccountId } }));
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v29' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), version: 'v30' }));
 app.post('/api/debug', (req, res) => res.json({ body: req.body, query: req.query, contentType: req.headers['content-type'] }));
 
 // GOOGLE ADS
@@ -347,7 +347,7 @@ app.post('/api/capi/x-order', async (req, res) => {
 // TIKTOK OAUTH CALLBACK
 app.get('/', async (req, res) => {
   const authCode = req.query.auth_code;
-  if (!authCode) return res.send('<h2>Bearfoot Proxy v29 running</h2>');
+  if (!authCode) return res.send('<h2>Bearfoot Proxy v30 running</h2>');
   try {
     const body = JSON.stringify({ app_id: CONFIG.tiktok.appId, secret: CONFIG.tiktok.appSecret, auth_code: authCode });
     const token = await new Promise((resolve, reject) => {
@@ -361,7 +361,7 @@ app.get('/', async (req, res) => {
 
 // GOOGLE OAUTH FLOW
 app.get('/auth/google/start', (req, res) => {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientId = '6736684714-aas0ved9nrml829deu6d7jgf4j388p5s.apps.googleusercontent.com';
   const redirectUri = 'https://bearfoot-proxy.onrender.com/auth/google';
   const scopes = ['https://www.googleapis.com/auth/adwords', 'https://www.googleapis.com/auth/content', 'https://www.googleapis.com/auth/analytics.readonly', 'https://www.googleapis.com/auth/tagmanager.readonly', 'https://www.googleapis.com/auth/cloudplatformprojects', 'https://www.googleapis.com/auth/cloud-platform'].join(' ');
   const url = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=' + clientId + '&redirect_uri=' + encodeURIComponent(redirectUri) + '&response_type=code&scope=' + encodeURIComponent(scopes) + '&access_type=offline&prompt=consent';
@@ -372,7 +372,7 @@ app.get('/auth/google', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.send('<h2>No code provided</h2>');
   try {
-    const body = new URLSearchParams({ code, client_id: process.env.GOOGLE_CLIENT_ID, client_secret: process.env.GOOGLE_CLIENT_SECRET, redirect_uri: 'https://bearfoot-proxy.onrender.com/auth/google', grant_type: 'authorization_code' }).toString();
+    const body = new URLSearchParams({ code, client_id: '6736684714-aas0ved9nrml829deu6d7jgf4j388p5s.apps.googleusercontent.com', client_secret: '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', redirect_uri: 'https://bearfoot-proxy.onrender.com/auth/google', grant_type: 'authorization_code' }).toString();
     const result = await new Promise((resolve, reject) => {
       const opts = { hostname: 'oauth2.googleapis.com', path: '/token', method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) } };
       const r = https.request(opts, res2 => { let d=''; res2.on('data',c=>d+=c); res2.on('end',()=>{ try { resolve(JSON.parse(d)); } catch(e) { reject(e); } }); });
@@ -518,4 +518,4 @@ app.all('/api/mailchimp', async (req, res) => {
 });
 
 function keepAlive() { https.get('https://bearfoot-proxy.onrender.com/health', () => {}).on('error', () => {}); setTimeout(keepAlive, 840000); }
-app.listen(process.env.PORT || 3000, () => { console.log('Bearfoot proxy v29 running'); setTimeout(keepAlive, 5000); });
+app.listen(process.env.PORT || 3000, () => { console.log('Bearfoot proxy v30 running'); setTimeout(keepAlive, 5000); });
