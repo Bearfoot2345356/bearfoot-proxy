@@ -567,8 +567,9 @@ app.all('/api/mailchimp', async (req, res) => {
 // GOOGLE SAFE BROWSING
 app.get('/api/safebrowsing', async (req, res) => {
   const url = req.query.url || 'https://bearfoot.store';
+  const apiKey = process.env.SAFE_BROWSING_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'SAFE_BROWSING_API_KEY not set' });
   try {
-    const token = await getGToken();
     const body = JSON.stringify({
       client: { clientId: 'bearfoot-proxy', clientVersion: '1.0' },
       threatInfo: {
@@ -579,7 +580,7 @@ app.get('/api/safebrowsing', async (req, res) => {
       }
     });
     const result = await new Promise((resolve, reject) => {
-      const opts = { hostname: 'safebrowsing.googleapis.com', path: '/v4/threatMatches:find', method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } };
+      const opts = { hostname: 'safebrowsing.googleapis.com', path: '/v4/threatMatches:find?key=' + apiKey, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } };
       const r = https.request(opts, res2 => { let d=''; res2.on('data',c=>d+=c); res2.on('end',()=>{ try { resolve(JSON.parse(d)); } catch(e) { resolve({ _raw: d.substring(0,1000) }); } }); });
       r.on('error', reject); r.write(body); r.end();
     });
